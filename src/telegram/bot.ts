@@ -1,4 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
+import type { Message as TMessage } from 'node-telegram-bot-api';
 import fs from 'fs-extra';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -50,7 +51,7 @@ export async function startTelegramBot(): Promise<void> {
   });
 }
 
-async function handleMessage(msg: TelegramBot.Message, chatId: string): Promise<void> {
+async function handleMessage(msg: TMessage, chatId: string): Promise<void> {
   if (!botInstance) return;
   const text = msg.text ?? '';
   const userId = String(msg.from?.id ?? chatId);
@@ -99,7 +100,7 @@ async function handleMessage(msg: TelegramBot.Message, chatId: string): Promise<
   await runAgentTask(text, chatId, userId);
 }
 
-async function handleCommand(text: string, msg: TelegramBot.Message, chatId: string, userId: string): Promise<void> {
+async function handleCommand(text: string, msg: TMessage, chatId: string, userId: string): Promise<void> {
   if (!botInstance) return;
   const parts = text.split(' ');
   const cmd = parts[0].replace('/', '').toLowerCase();
@@ -322,7 +323,7 @@ async function runAgentTask(userMessage: string, chatId: string, userId: string)
   }
 }
 
-async function handleVoiceMessage(msg: TelegramBot.Message, chatId: string, userId: string): Promise<void> {
+async function handleVoiceMessage(msg: TMessage, chatId: string, userId: string): Promise<void> {
   if (!botInstance) return;
 
   // Check if Groq key exists
@@ -371,14 +372,14 @@ async function handleVoiceMessage(msg: TelegramBot.Message, chatId: string, user
   }
 }
 
-async function handleSticker(msg: TelegramBot.Message, chatId: string): Promise<void> {
+async function handleSticker(msg: TMessage, chatId: string): Promise<void> {
   if (!botInstance) return;
   const emoji = msg.sticker?.emoji ?? '';
   const setName = msg.sticker?.set_name ?? 'unknown';
   await botInstance.sendMessage(chatId, `🎭 Sticker received: ${emoji} (set: ${setName})\nSticker vision description coming soon.`);
 }
 
-async function handleUnknownUser(msg: TelegramBot.Message): Promise<void> {
+async function handleUnknownUser(msg: TMessage): Promise<void> {
   if (!botInstance) return;
   const chatId = String(msg.chat.id);
   const db = getDb();
@@ -615,7 +616,7 @@ Platform: ${process.platform}`;
   await botInstance.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
 }
 
-async function sendProfile(chatId: string, msg: TelegramBot.Message): Promise<void> {
+async function sendProfile(chatId: string, msg: TMessage): Promise<void> {
   if (!botInstance) return;
   const user = msg.from;
   const profile = `👤 *Profile*

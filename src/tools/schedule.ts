@@ -3,7 +3,7 @@ import { registerTool } from './registry.js';
 import { getDb } from '../storage/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
-const activeJobs = new Map<string, cron.ScheduledTask>();
+const activeJobs = new Map<string, any>();
 
 registerTool(
   {

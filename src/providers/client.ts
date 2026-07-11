@@ -89,15 +89,15 @@ async function callAnthropic(
 
   const anthropicMessages = chatMessages.map(m => ({
     role: m.role as 'user' | 'assistant',
-    content: m.toolCalls
+    content: m.role === 'tool'
+      ? [{ type: 'tool_result' as const, tool_use_id: m.toolCallId!, content: m.content }]
+      : m.toolCalls
       ? m.toolCalls.map(tc => ({
           type: 'tool_use' as const,
           id: tc.id,
           name: tc.name,
           input: tc.arguments,
         }))
-      : m.toolCallId
-      ? [{ type: 'tool_result' as const, tool_use_id: m.toolCallId, content: m.content }]
       : m.content,
   }));
 
@@ -111,7 +111,7 @@ async function callAnthropic(
     model,
     system: systemMsg?.content as string | undefined,
     messages: anthropicMessages as any,
-    tools: anthropicTools as any,
+    tools: anthropicTools as any[],
     max_tokens: options?.maxTokens ?? 8192,
   });
 
@@ -120,11 +120,11 @@ async function callAnthropic(
 
   return {
     content: textBlock?.type === 'text' ? textBlock.text : '',
-    toolCalls: toolBlocks.map(b => ({
+    toolCalls: toolBlocks.length > 0 ? toolBlocks.map(b => ({
       id: b.id,
       name: b.name,
       arguments: b.input,
-    })),
+    })) : undefined,
     usage: {
       promptTokens: res.usage.input_tokens,
       completionTokens: res.usage.output_tokens,
@@ -266,8 +266,15 @@ async function streamAnthropic(
   const stream = await client.messages.stream({
     model,
     system: systemMsg?.content as string | undefined,
-    messages: chatMessages as any,
-    tools: tools?.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })) as any,
+    messages: chatMessages.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.role === 'tool'
+        ? [{ type: 'tool_result' as const, tool_use_id: m.toolCallId!, content: m.content }]
+        : m.toolCalls
+        ? m.toolCalls.map(tc => ({ type: 'tool_use' as const, id: tc.id, name: tc.name, input: tc.arguments }))
+        : m.content
+    })) as any,
+    tools: tools?.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })) as any[],
     max_tokens: options?.maxTokens ?? 8192,
   });
 
@@ -284,7 +291,7 @@ async function streamAnthropic(
 
   return {
     content: fullContent,
-    toolCalls: toolBlocks.map(b => ({ id: b.id, name: b.name, arguments: b.input })),
+    toolCalls: toolBlocks.length > 0 ? toolBlocks.map(b => ({ id: b.id, name: b.name, arguments: b.input })) : undefined,
     usage: {
       promptTokens: final.usage.input_tokens,
       completionTokens: final.usage.output_tokens,
