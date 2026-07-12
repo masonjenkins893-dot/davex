@@ -3,7 +3,7 @@ import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
 import fs from 'fs-extra';
-import { getDb } from './storage/db.js';
+import { initDb } from './storage/db.js';
 import { isFirstRun } from './config/settings.js';
 import { initTools } from './tools/registry.js';
 import { startTelegramBot } from './telegram/bot.js';
@@ -18,7 +18,7 @@ import { DAVEX_VERSION, DAVEX_AUTHOR, DAVEX_COMPANY, DAVEX_HOME } from './config
 
 async function bootstrap(): Promise<void> {
   await fs.ensureDir(DAVEX_HOME);
-  getDb(); // init database + run migrations
+  await initDb(); // init database + run migrations
   await initTools();
   await loadSkills();
   await loadExtensions();
