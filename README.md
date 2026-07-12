@@ -35,6 +35,14 @@ davex
 
 ---
 
+## Database Setup
+
+DaveX uses Supabase for storage. Before running the setup wizard, you **must** initialize your database tables:
+
+1. Go to your [Supabase Dashboard](https://supabase.com/dashboard).
+2. Open your project and go to the **SQL Editor**.
+3. Copy the contents of [`supabase_schema.sql`](./supabase_schema.sql) and run it.
+
 ## First run
 
 1. DaveX shows its logo
