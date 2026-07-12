@@ -1,22 +1,37 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database } from 'sql.js';
 import fs from 'fs-extra';
 import path from 'path';
 import { DAVEX_DB_PATH, DAVEX_HOME } from '../config/constants.js';
 
-let _db: Database.Database | null = null;
+let _db: Database | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   if (_db) return _db;
-  fs.ensureDirSync(DAVEX_HOME);
-  _db = new Database(DAVEX_DB_PATH);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
-  runMigrations(_db);
-  return _db;
+  throw new Error('Database not initialized. Call initDb() first.');
 }
 
-function runMigrations(db: Database.Database) {
-  db.exec(`
+export async function initDb(): Promise<void> {
+  if (_db) return;
+  fs.ensureDirSync(DAVEX_HOME);
+  const SQL = await initSqlJs();
+  if (fs.existsSync(DAVEX_DB_PATH)) {
+    const fileBuffer = fs.readFileSync(DAVEX_DB_PATH);
+    _db = new SQL.Database(fileBuffer);
+  } else {
+    _db = new SQL.Database();
+  }
+  runMigrations(_db);
+  saveDb();
+}
+
+export function saveDb(): void {
+  if (!_db) return;
+  const data = _db.export();
+  fs.writeFileSync(DAVEX_DB_PATH, Buffer.from(data));
+}
+
+function runMigrations(db: Database) {
+  db.run(`
     CREATE TABLE IF NOT EXISTS config (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -45,7 +60,7 @@ function runMigrations(db: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS messages (
       id          TEXT PRIMARY KEY,
-      session_id  TEXT NOT NULL REFERENCES sessions(id),
+      session_id  TEXT NOT NULL,
       role        TEXT NOT NULL,
       content     TEXT NOT NULL,
       tool_calls  TEXT,
@@ -74,14 +89,14 @@ function runMigrations(db: Database.Database) {
     );
 
     CREATE TABLE IF NOT EXISTS usage (
-      id              TEXT PRIMARY KEY,
-      session_id      TEXT,
-      provider        TEXT,
-      model           TEXT,
-      prompt_tokens   INTEGER DEFAULT 0,
+      id                TEXT PRIMARY KEY,
+      session_id        TEXT,
+      provider          TEXT,
+      model             TEXT,
+      prompt_tokens     INTEGER DEFAULT 0,
       completion_tokens INTEGER DEFAULT 0,
-      total_tokens    INTEGER DEFAULT 0,
-      created_at      TEXT DEFAULT (datetime('now'))
+      total_tokens      INTEGER DEFAULT 0,
+      created_at        TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS todos (
@@ -158,16 +173,19 @@ function runMigrations(db: Database.Database) {
 
 export function getConfig(key: string): string | null {
   const db = getDb();
-  const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key) as { value: string } | undefined;
-  return row?.value ?? null;
+  const res = db.exec('SELECT value FROM config WHERE key = ?', [key]);
+  if (!res.length || !res[0].values.length) return null;
+  return res[0].values[0][0] as string;
 }
 
 export function setConfig(key: string, value: string): void {
   const db = getDb();
-  db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
+  db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, value]);
+  saveDb();
 }
 
 export function deleteConfig(key: string): void {
   const db = getDb();
-  db.prepare('DELETE FROM config WHERE key = ?').run(key);
+  db.run('DELETE FROM config WHERE key = ?', [key]);
+  saveDb();
 }
