@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import path from 'path';
-import { getDb } from '../storage/db.js';
+import { prepare } from '../storage/db.js';
 import { v4 as uuidv4 } from 'uuid';
 import { DAVEX_SKILLS_DIR } from '../config/constants.js';
 
@@ -14,7 +14,6 @@ export interface SkillRecord {
 
 export async function loadSkills(): Promise<SkillRecord[]> {
   await fs.ensureDir(DAVEX_SKILLS_DIR);
-  const db = getDb();
   const dirs = await fs.readdir(DAVEX_SKILLS_DIR, { withFileTypes: true });
 
   for (const dir of dirs) {
@@ -25,9 +24,9 @@ export async function loadSkills(): Promise<SkillRecord[]> {
       const descMatch = content.match(/description:\s*(.+)/i);
       const description = descMatch?.[1]?.trim() ?? '';
 
-      const existing = db.prepare('SELECT id FROM skills WHERE name = ?').get(dir.name);
+      const existing = prepare('SELECT id FROM skills WHERE name = ?').get(dir.name);
       if (!existing) {
-        db.prepare('INSERT INTO skills (id, name, description, path, enabled) VALUES (?, ?, ?, ?, 1)')
+        prepare('INSERT INTO skills (id, name, description, path, enabled) VALUES (?, ?, ?, ?, 1)')
           .run(uuidv4(), dir.name, description, skillFile);
       }
     }
@@ -37,8 +36,7 @@ export async function loadSkills(): Promise<SkillRecord[]> {
 }
 
 export function listSkills(): SkillRecord[] {
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM skills').all() as any[];
+  const rows = prepare('SELECT * FROM skills').all() as any[];
   return rows.map(r => ({
     id: r.id,
     name: r.name,
@@ -49,13 +47,11 @@ export function listSkills(): SkillRecord[] {
 }
 
 export function toggleSkill(name: string, enabled: boolean): void {
-  const db = getDb();
-  db.prepare('UPDATE skills SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name);
+  prepare('UPDATE skills SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name);
 }
 
 export function removeSkill(name: string): void {
-  const db = getDb();
-  db.prepare('DELETE FROM skills WHERE name = ?').run(name);
+  prepare('DELETE FROM skills WHERE name = ?').run(name);
 }
 
 export async function getActiveSkillsContext(): Promise<string> {

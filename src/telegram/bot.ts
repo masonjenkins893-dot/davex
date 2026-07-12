@@ -4,7 +4,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getSetting, setSetting } from '../config/settings.js';
-import { getDb, getConfig } from '../storage/db.js';
+import { prepare, getConfig } from '../storage/db.js';
 import { runAgentLoop } from '../agent/loop.js';
 import { transcribeVoice, hasGroqWhisperKey, saveGroqWhisperKey } from '../voice/whisper.js';
 import { listMemory, clearMemory } from '../memory/manager.js';
@@ -247,7 +247,6 @@ async function handleCommand(text: string, msg: TMessage, chatId: string, userId
 async function runAgentTask(userMessage: string, chatId: string, userId: string): Promise<void> {
   if (!botInstance) return;
 
-  const db = getDb();
   const sessionId = getOrCreateSession(chatId);
   const workspacePath = getSetting('workspacePath') || process.env.HOME || '/tmp';
 
@@ -382,13 +381,12 @@ async function handleSticker(msg: TMessage, chatId: string): Promise<void> {
 async function handleUnknownUser(msg: TMessage): Promise<void> {
   if (!botInstance) return;
   const chatId = String(msg.chat.id);
-  const db = getDb();
 
   // Generate pairing code
   const code = generatePairingCode();
   const expiresAt = new Date(Date.now() + 3600_000).toISOString();
 
-  db.prepare('INSERT OR REPLACE INTO pairing_codes (id, platform, user_id, code, expires_at) VALUES (?, ?, ?, ?, ?)')
+  prepare('INSERT OR REPLACE INTO pairing_codes (id, platform, user_id, code, expires_at) VALUES (?, ?, ?, ?, ?)')
     .run(uuidv4(), 'telegram', chatId, code, expiresAt);
 
   await botInstance.sendMessage(
@@ -414,12 +412,11 @@ async function handleApprove(chatId: string, args: string): Promise<void> {
   const code = args.trim();
   if (!code) { await botInstance.sendMessage(chatId, 'Usage: /approve <code>'); return; }
 
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM pairing_codes WHERE code = ? AND used = 0').get(code) as any;
+  const row = prepare('SELECT * FROM pairing_codes WHERE code = ? AND used = 0').get(code) as any;
   if (!row) { await botInstance.sendMessage(chatId, '❌ Code not found or already used.'); return; }
 
-  db.prepare('UPDATE pairing_codes SET used = 1 WHERE code = ?').run(code);
-  db.prepare('INSERT OR IGNORE INTO approved_users (id, platform, user_id) VALUES (?, ?, ?)').run(uuidv4(), row.platform, row.user_id);
+  prepare('UPDATE pairing_codes SET used = 1 WHERE code = ?').run(code);
+  prepare('INSERT OR IGNORE INTO approved_users (id, platform, user_id) VALUES (?, ?, ?)').run(uuidv4(), row.platform, row.user_id);
 
   await botInstance.sendMessage(chatId, `✅ User ${row.user_id} approved.`);
   await botInstance.sendMessage(row.user_id, '✅ You have been approved! You can now use DaveX.').catch(() => {});
@@ -429,8 +426,7 @@ async function handleDeny(chatId: string, args: string): Promise<void> {
   if (!botInstance) return;
   const code = args.trim();
   if (!code) { await botInstance.sendMessage(chatId, 'Usage: /deny <code>'); return; }
-  const db = getDb();
-  db.prepare('DELETE FROM pairing_codes WHERE code = ?').run(code);
+  prepare('DELETE FROM pairing_codes WHERE code = ?').run(code);
   await botInstance.sendMessage(chatId, `❌ Code ${code} denied and removed.`);
 }
 
@@ -449,15 +445,13 @@ async function stopCurrentTask(chatId: string, userId: string): Promise<void> {
 async function resetSession(chatId: string, userId: string): Promise<void> {
   if (!botInstance) return;
   // Create new session
-  const db = getDb();
-  db.prepare("UPDATE sessions SET is_active = 0 WHERE chat_id = ? AND platform = 'telegram'").run(chatId);
+  prepare("UPDATE sessions SET is_active = 0 WHERE chat_id = ? AND platform = 'telegram'").run(chatId);
   await botInstance.sendMessage(chatId, '🔄 Session reset. Starting fresh!');
 }
 
 async function retryLastMessage(chatId: string, userId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const row = db.prepare(
+  const row = prepare(
     "SELECT content FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE chat_id = ?) AND role = 'user' ORDER BY created_at DESC LIMIT 1"
   ).get(chatId) as any;
   if (row) {
@@ -546,8 +540,7 @@ async function sendMemory(chatId: string, args: string): Promise<void> {
 
 async function sendUsage(chatId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const row = db.prepare('SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t FROM usage').get() as any;
+  const row = prepare('SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t FROM usage').get() as any;
   const msg = `📊 *Token Usage*
 Prompt tokens: ${row?.p ?? 0}
 Completion tokens: ${row?.c ?? 0}
@@ -557,8 +550,7 @@ Total tokens: ${row?.t ?? 0}`;
 
 async function sendInsights(chatId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const rows = db.prepare('SELECT provider, model, COUNT(*) as sessions, SUM(total_tokens) as tokens FROM usage GROUP BY provider, model').all() as any[];
+  const rows = prepare('SELECT provider, model, COUNT(*) as sessions, SUM(total_tokens) as tokens FROM usage GROUP BY provider, model').all() as any[];
   if (rows.length === 0) { await botInstance.sendMessage(chatId, 'No usage data yet.'); return; }
   const lines = rows.map(r => `• ${r.provider}/${r.model}: ${r.sessions} sessions, ${r.tokens} tokens`);
   await botInstance.sendMessage(chatId, `📈 *Insights*\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
@@ -566,8 +558,7 @@ async function sendInsights(chatId: string): Promise<void> {
 
 async function sendKanban(chatId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM kanban ORDER BY updated_at DESC LIMIT 20').all() as any[];
+  const rows = prepare('SELECT * FROM kanban ORDER BY updated_at DESC LIMIT 20').all() as any[];
   if (rows.length === 0) { await botInstance.sendMessage(chatId, '📋 Kanban board is empty.'); return; }
 
   const byStatus: Record<string, string[]> = { todo: [], in_progress: [], done: [] };
@@ -586,8 +577,7 @@ async function sendKanban(chatId: string): Promise<void> {
 
 async function sendSessions(chatId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 10').all() as any[];
+  const rows = prepare('SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 10').all() as any[];
   if (rows.length === 0) { await botInstance.sendMessage(chatId, 'No sessions yet.'); return; }
   const lines = rows.map(r => `• ${r.title ?? 'Untitled'} (${r.platform}) — ${r.updated_at}`);
   await botInstance.sendMessage(chatId, `📋 *Sessions*\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
@@ -595,8 +585,7 @@ async function sendSessions(chatId: string): Promise<void> {
 
 async function sendSkills(chatId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM skills').all() as any[];
+  const rows = prepare('SELECT * FROM skills').all() as any[];
   if (rows.length === 0) { await botInstance.sendMessage(chatId, '🛠️ No skills installed yet.'); return; }
   const lines = rows.map(r => `• ${r.name} ${r.enabled ? '✅' : '❌'}`);
   await botInstance.sendMessage(chatId, `🛠️ *Skills*\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
@@ -604,9 +593,8 @@ async function sendSkills(chatId: string): Promise<void> {
 
 async function sendDebug(chatId: string): Promise<void> {
   if (!botInstance) return;
-  const db = getDb();
-  const msgCount = (db.prepare('SELECT COUNT(*) as c FROM messages').get() as any)?.c ?? 0;
-  const memCount = (db.prepare('SELECT COUNT(*) as c FROM memory').get() as any)?.c ?? 0;
+  const msgCount = (prepare('SELECT COUNT(*) as c FROM messages').get() as any)?.c ?? 0;
+  const memCount = (prepare('SELECT COUNT(*) as c FROM memory').get() as any)?.c ?? 0;
   const msg = `🐛 *Debug*
 Messages in DB: ${msgCount}
 Memory entries: ${memCount}
@@ -657,11 +645,10 @@ export async function sendToTelegram(message: string): Promise<void> {
 }
 
 function getOrCreateSession(chatId: string): string {
-  const db = getDb();
-  const existing = db.prepare("SELECT id FROM sessions WHERE chat_id = ? AND platform = 'telegram' AND is_active = 1").get(chatId) as any;
+  const existing = prepare("SELECT id FROM sessions WHERE chat_id = ? AND platform = 'telegram' AND is_active = 1").get(chatId) as any;
   if (existing) return existing.id;
   const id = uuidv4();
-  db.prepare("INSERT INTO sessions (id, platform, chat_id) VALUES (?, 'telegram', ?)").run(id, chatId);
+  prepare("INSERT INTO sessions (id, platform, chat_id) VALUES (?, 'telegram', ?)").run(id, chatId);
   return id;
 }
 

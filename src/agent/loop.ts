@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { streamChatCompletion } from '../providers/client.js';
 import { getToolDefinitions, executeTool } from '../tools/registry.js';
 import { buildSystemPrompt } from './system-prompt.js';
-import { getDb } from '../storage/db.js';
+import { prepare } from '../storage/db.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { MAX_AGENT_ITERATIONS } from '../config/constants.js';
 import type {
@@ -64,7 +64,6 @@ const WRITE_TODOS_TOOL: import('./types.js').ToolDefinition = {
 };
 
 export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
-  const db = getDb();
   const { context } = task;
   const sessionId = context.sessionId;
   const systemPrompt = buildSystemPrompt(context);
@@ -82,7 +81,7 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
   let totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
   // Save user message
-  db.prepare('INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)').run(
+  prepare('INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)').run(
     uuidv4(), sessionId, 'user', task.userMessage
   );
 
@@ -115,7 +114,7 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
       messages.push(assistantMsg);
 
       // Save to DB
-      db.prepare('INSERT INTO messages (id, session_id, role, content, tool_calls) VALUES (?, ?, ?, ?, ?)').run(
+      prepare('INSERT INTO messages (id, session_id, role, content, tool_calls) VALUES (?, ?, ?, ?, ?)').run(
         uuidv4(), sessionId, 'assistant',
         response.content || assistantContent,
         response.toolCalls ? JSON.stringify(response.toolCalls) : null
@@ -152,7 +151,7 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
         });
 
         // Save tool result
-        db.prepare('INSERT INTO tool_results (id, session_id, tool_name, input, output) VALUES (?, ?, ?, ?, ?)').run(
+        prepare('INSERT INTO tool_results (id, session_id, tool_name, input, output) VALUES (?, ?, ?, ?, ?)').run(
           uuidv4(), sessionId, toolCall.name,
           JSON.stringify(toolCall.arguments),
           result.output
@@ -170,7 +169,7 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
   // Save usage
   const provider = getActiveProvider();
   if (provider) {
-    db.prepare(`
+    prepare(`
       INSERT INTO usage (id, session_id, provider, model, prompt_tokens, completion_tokens, total_tokens)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(uuidv4(), sessionId, provider.id, provider.model ?? 'unknown',

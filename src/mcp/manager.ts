@@ -1,4 +1,4 @@
-import { getDb } from '../storage/db.js';
+import { prepare } from '../storage/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface McpServerConfig {
@@ -11,16 +11,14 @@ export interface McpServerConfig {
 }
 
 export function addMcpServer(name: string, opts: { url?: string; command?: string; args?: string[] }): void {
-  const db = getDb();
-  db.prepare(`
+  prepare(`
     INSERT INTO mcp_servers (id, name, url, command, args, enabled)
     VALUES (?, ?, ?, ?, ?, 1)
   `).run(uuidv4(), name, opts.url ?? null, opts.command ?? null, opts.args ? JSON.stringify(opts.args) : null);
 }
 
 export function listMcpServers(): McpServerConfig[] {
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM mcp_servers').all() as any[];
+  const rows = prepare('SELECT * FROM mcp_servers').all() as any[];
   return rows.map(r => ({
     id: r.id,
     name: r.name,
@@ -32,13 +30,11 @@ export function listMcpServers(): McpServerConfig[] {
 }
 
 export function removeMcpServer(name: string): void {
-  const db = getDb();
-  db.prepare('DELETE FROM mcp_servers WHERE name = ?').run(name);
+  prepare('DELETE FROM mcp_servers WHERE name = ?').run(name);
 }
 
 export function toggleMcpServer(name: string, enabled: boolean): void {
-  const db = getDb();
-  db.prepare('UPDATE mcp_servers SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name);
+  prepare('UPDATE mcp_servers SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name);
 }
 
 // Connects to configured MCP servers at startup, same pattern as OpenClaw/Gemini CLI:

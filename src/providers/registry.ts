@@ -1,4 +1,4 @@
-import { getDb } from '../storage/db.js';
+import { prepare } from '../storage/db.js';
 import { PROVIDERS, type ProviderId } from '../config/constants.js';
 import { getSetting, setSetting } from '../config/settings.js';
 import axios from 'axios';
@@ -13,8 +13,7 @@ export interface ProviderRecord {
 }
 
 export function listSavedProviders(): ProviderRecord[] {
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM providers').all() as any[];
+  const rows = prepare('SELECT * FROM providers').all() as any[];
   return rows.map(r => ({
     id: r.id,
     name: r.name,
@@ -26,26 +25,23 @@ export function listSavedProviders(): ProviderRecord[] {
 }
 
 export function saveProvider(id: string, apiKey: string, model: string): void {
-  const db = getDb();
   const info = PROVIDERS.find(p => p.id === id);
   if (!info) throw new Error(`Unknown provider: ${id}`);
-  db.prepare(`
+  prepare(`
     INSERT OR REPLACE INTO providers (id, name, api_key, base_url, model)
     VALUES (?, ?, ?, ?, ?)
   `).run(id, info.name, apiKey, info.baseUrl, model);
 }
 
 export function setActiveProvider(providerId: string, model: string): void {
-  const db = getDb();
-  db.prepare('UPDATE providers SET is_active = 0').run();
-  db.prepare('UPDATE providers SET is_active = 1, model = ? WHERE id = ?').run(model, providerId);
+  prepare('UPDATE providers SET is_active = 0').run();
+  prepare('UPDATE providers SET is_active = 1, model = ? WHERE id = ?').run(model, providerId);
   setSetting('activeProvider', providerId);
   setSetting('activeModel', model);
 }
 
 export function getActiveProvider(): ProviderRecord | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM providers WHERE is_active = 1').get() as any;
+  const row = prepare('SELECT * FROM providers WHERE is_active = 1').get() as any;
   if (!row) return null;
   return {
     id: row.id,

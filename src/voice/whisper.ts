@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import { getSetting, setSetting } from '../config/settings.js';
-import { getDb } from '../storage/db.js';
+import { prepare } from '../storage/db.js';
 
 export async function transcribeVoice(audioFilePath: string): Promise<string> {
   // Get or ask for Groq API key
@@ -26,10 +26,9 @@ export async function transcribeVoice(audioFilePath: string): Promise<string> {
 export function saveGroqWhisperKey(apiKey: string): void {
   setSetting('groqApiKeyForWhisper', apiKey);
   // Also save to providers table so it can be reused
-  const db = getDb();
-  const existing = db.prepare("SELECT id FROM providers WHERE id = 'groq'").get();
+  const existing = prepare("SELECT id FROM providers WHERE id = 'groq'").get();
   if (!existing) {
-    db.prepare("INSERT OR IGNORE INTO providers (id, name, api_key, base_url) VALUES ('groq', 'Groq', ?, 'https://api.groq.com/openai/v1')")
+    prepare("INSERT OR IGNORE INTO providers (id, name, api_key, base_url) VALUES ('groq', 'Groq', ?, 'https://api.groq.com/openai/v1')")
       .run(apiKey);
   }
 }
@@ -38,8 +37,7 @@ export function hasGroqWhisperKey(): boolean {
   const key = getSetting('groqApiKeyForWhisper');
   // Also check providers table
   if (!key) {
-    const db = getDb();
-    const row = db.prepare("SELECT api_key FROM providers WHERE id = 'groq'").get() as any;
+    const row = prepare("SELECT api_key FROM providers WHERE id = 'groq'").get() as any;
     if (row?.api_key) {
       setSetting('groqApiKeyForWhisper', row.api_key);
       return true;

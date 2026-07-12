@@ -1,6 +1,5 @@
 import initSqlJs, { Database } from 'sql.js';
 import fs from 'fs-extra';
-import path from 'path';
 import { DAVEX_DB_PATH, DAVEX_HOME } from '../config/constants.js';
 
 let _db: Database | null = null;
@@ -30,13 +29,42 @@ export function saveDb(): void {
   fs.writeFileSync(DAVEX_DB_PATH, Buffer.from(data));
 }
 
+// Compatibility layer: mimics better-sqlite3 API on top of sql.js
+export function prepare(sql: string) {
+  const db = getDb();
+  return {
+    get(...params: any[]): any {
+      const res = db.exec(sql, params.length ? params : undefined);
+      if (!res.length || !res[0].values.length) return undefined;
+      const cols = res[0].columns;
+      const vals = res[0].values[0];
+      const obj: any = {};
+      cols.forEach((c, i) => { obj[c] = vals[i]; });
+      return obj;
+    },
+    all(...params: any[]): any[] {
+      const res = db.exec(sql, params.length ? params : undefined);
+      if (!res.length) return [];
+      const cols = res[0].columns;
+      return res[0].values.map(vals => {
+        const obj: any = {};
+        cols.forEach((c, i) => { obj[c] = vals[i]; });
+        return obj;
+      });
+    },
+    run(...params: any[]): void {
+      db.run(sql, params.length ? params : undefined);
+      saveDb();
+    }
+  };
+}
+
 function runMigrations(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS config (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS providers (
       id         TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -46,7 +74,6 @@ function runMigrations(db: Database) {
       is_active  INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS sessions (
       id          TEXT PRIMARY KEY,
       title       TEXT,
@@ -57,7 +84,6 @@ function runMigrations(db: Database) {
       updated_at  TEXT DEFAULT (datetime('now')),
       is_active   INTEGER DEFAULT 1
     );
-
     CREATE TABLE IF NOT EXISTS messages (
       id          TEXT PRIMARY KEY,
       session_id  TEXT NOT NULL,
@@ -67,7 +93,6 @@ function runMigrations(db: Database) {
       tool_name   TEXT,
       created_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS memory (
       id          TEXT PRIMARY KEY,
       key         TEXT NOT NULL,
@@ -77,7 +102,6 @@ function runMigrations(db: Database) {
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS tool_results (
       id          TEXT PRIMARY KEY,
       session_id  TEXT NOT NULL,
@@ -87,7 +111,6 @@ function runMigrations(db: Database) {
       error       TEXT,
       created_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS usage (
       id                TEXT PRIMARY KEY,
       session_id        TEXT,
@@ -98,7 +121,6 @@ function runMigrations(db: Database) {
       total_tokens      INTEGER DEFAULT 0,
       created_at        TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS todos (
       id          TEXT PRIMARY KEY,
       session_id  TEXT NOT NULL,
@@ -107,7 +129,6 @@ function runMigrations(db: Database) {
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS pairing_codes (
       id          TEXT PRIMARY KEY,
       platform    TEXT NOT NULL,
@@ -117,7 +138,6 @@ function runMigrations(db: Database) {
       used        INTEGER DEFAULT 0,
       created_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS approved_users (
       id          TEXT PRIMARY KEY,
       platform    TEXT NOT NULL,
@@ -125,7 +145,6 @@ function runMigrations(db: Database) {
       username    TEXT,
       approved_at TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS kanban (
       id          TEXT PRIMARY KEY,
       session_id  TEXT,
@@ -135,7 +154,6 @@ function runMigrations(db: Database) {
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS mcp_servers (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -145,7 +163,6 @@ function runMigrations(db: Database) {
       enabled     INTEGER DEFAULT 1,
       created_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS skills (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -154,7 +171,6 @@ function runMigrations(db: Database) {
       enabled     INTEGER DEFAULT 1,
       created_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE TABLE IF NOT EXISTS extensions (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -163,7 +179,6 @@ function runMigrations(db: Database) {
       enabled     INTEGER DEFAULT 1,
       created_at  TEXT DEFAULT (datetime('now'))
     );
-
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_memory_key ON memory(key);
     CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
@@ -172,20 +187,14 @@ function runMigrations(db: Database) {
 }
 
 export function getConfig(key: string): string | null {
-  const db = getDb();
-  const res = db.exec('SELECT value FROM config WHERE key = ?', [key]);
-  if (!res.length || !res[0].values.length) return null;
-  return res[0].values[0][0] as string;
+  const res = prepare('SELECT value FROM config WHERE key = ?').get(key);
+  return res?.value ?? null;
 }
 
 export function setConfig(key: string, value: string): void {
-  const db = getDb();
-  db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', [key, value]);
-  saveDb();
+  prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
 }
 
 export function deleteConfig(key: string): void {
-  const db = getDb();
-  db.run('DELETE FROM config WHERE key = ?', [key]);
-  saveDb();
+  prepare('DELETE FROM config WHERE key = ?').run(key);
 }
