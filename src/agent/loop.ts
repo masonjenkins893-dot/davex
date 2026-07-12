@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { streamChatCompletion } from '../providers/client.js';
 import { getToolDefinitions, executeTool } from '../tools/registry.js';
 import { buildSystemPrompt } from './system-prompt.js';
-import { prepare } from '../storage/db.js';
+import { getDb } from '../storage/db.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { MAX_AGENT_ITERATIONS } from '../config/constants.js';
 import type {
@@ -64,6 +64,7 @@ const WRITE_TODOS_TOOL: import('./types.js').ToolDefinition = {
 };
 
 export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
+  const db = getDb();
   const { context } = task;
   const sessionId = context.sessionId;
   const systemPrompt = buildSystemPrompt(context);
@@ -80,10 +81,10 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
   let todos: Todo[] = [];
   let totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-  // Save user message
-  prepare('INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)').run(
-    uuidv4(), sessionId, 'user', task.userMessage
-  );
+  // Save user message (best-effort — a DB hiccup shouldn't kill the loop)
+  await db.from('messages').insert({
+    id: uuidv4(), session_id: sessionId, role: 'user', content: task.userMessage,
+  }).then(({ error }) => { if (error) console.error('Failed to save user message:', error.message); });
 
   while (!done && iterations < MAX_AGENT_ITERATIONS) {
     if (task.abortSignal?.aborted) break;
@@ -92,6 +93,8 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
     let assistantContent = '';
 
     try {
+      task.onProgress?.(`\n🧠 Thinking (step ${iterations})...\n`);
+
       const response = await streamChatCompletion(
         messages,
         toolDefs,
@@ -113,12 +116,12 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
       };
       messages.push(assistantMsg);
 
-      // Save to DB
-      prepare('INSERT INTO messages (id, session_id, role, content, tool_calls) VALUES (?, ?, ?, ?, ?)').run(
-        uuidv4(), sessionId, 'assistant',
-        response.content || assistantContent,
-        response.toolCalls ? JSON.stringify(response.toolCalls) : null
-      );
+      // Save to DB (best-effort)
+      db.from('messages').insert({
+        id: uuidv4(), session_id: sessionId, role: 'assistant',
+        content: response.content || assistantContent,
+        tool_calls: response.toolCalls ?? null,
+      }).then(({ error }) => { if (error) console.error('Failed to save assistant message:', error.message); });
 
       // No tool calls = done
       if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -127,11 +130,22 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
         break;
       }
 
-      // Process tool calls
+      // Process tool calls — visibly, so the terminal/telegram shows what's happening
       for (const toolCall of response.toolCalls) {
         if (task.abortSignal?.aborted) break;
 
+        if (toolCall.name !== 'ask_user' && toolCall.name !== 'task_complete' && toolCall.name !== 'write_todos') {
+          const argsPreview = JSON.stringify(toolCall.arguments);
+          const shortArgs = argsPreview.length > 200 ? argsPreview.slice(0, 200) + '…' : argsPreview;
+          task.onProgress?.(`\n🔧 Running ${toolCall.name}(${shortArgs})\n`);
+        }
+
         const result = await handleToolCall(toolCall, task, todos, context);
+
+        if (toolCall.name !== 'ask_user' && toolCall.name !== 'task_complete' && toolCall.name !== 'write_todos') {
+          const outPreview = result.output.length > 300 ? result.output.slice(0, 300) + '…' : result.output;
+          task.onProgress?.(`   ↳ ${outPreview}\n`);
+        }
 
         if (result.isDone) {
           finalOutput = result.output;
@@ -150,12 +164,12 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
           name: toolCall.name,
         });
 
-        // Save tool result
-        prepare('INSERT INTO tool_results (id, session_id, tool_name, input, output) VALUES (?, ?, ?, ?, ?)').run(
-          uuidv4(), sessionId, toolCall.name,
-          JSON.stringify(toolCall.arguments),
-          result.output
-        );
+        // Save tool result (best-effort)
+        db.from('tool_results').insert({
+          id: uuidv4(), session_id: sessionId, tool_name: toolCall.name,
+          input: JSON.stringify(toolCall.arguments),
+          output: result.output,
+        }).then(({ error }) => { if (error) console.error('Failed to save tool result:', error.message); });
       }
 
     } catch (err: any) {
@@ -166,14 +180,16 @@ export async function runAgentLoop(task: AgentTask): Promise<AgentLoopResult> {
     }
   }
 
-  // Save usage
-  const provider = getActiveProvider();
+  // Save usage (best-effort)
+  const provider = await getActiveProvider();
   if (provider) {
-    prepare(`
-      INSERT INTO usage (id, session_id, provider, model, prompt_tokens, completion_tokens, total_tokens)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), sessionId, provider.id, provider.model ?? 'unknown',
-      totalUsage.promptTokens, totalUsage.completionTokens, totalUsage.totalTokens);
+    const { error } = await db.from('usage').insert({
+      id: uuidv4(), session_id: sessionId, provider: provider.id, model: provider.model ?? 'unknown',
+      prompt_tokens: totalUsage.promptTokens,
+      completion_tokens: totalUsage.completionTokens,
+      total_tokens: totalUsage.totalTokens,
+    });
+    if (error) console.error('Failed to save usage:', error.message);
   }
 
   return {

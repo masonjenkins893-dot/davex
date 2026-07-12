@@ -4,13 +4,13 @@ set -e
 # ============================================================
 #  DaveX Installer
 #  Made by Inyang David @ Sixpert
-#  https://github.com/masonjenkins893-dot/davex
+#  https://github.com/sixpert/davex
 # ============================================================
 
 DAVEX_VERSION="1.0.0"
-REPO_URL="https://github.com/masonjenkins893-dot/davex.git"
+REPO_URL="https://github.com/sixpert/davex.git"
 INSTALL_DIR="$HOME/.davex/app"
-MIN_NODE_VERSION=20
+MIN_NODE_VERSION=22
 
 # Colors
 RED='\033[0;31m'
@@ -104,7 +104,7 @@ if [ -d "$INSTALL_DIR" ]; then
   log_info "Existing install found. Updating..."
   cd "$INSTALL_DIR"
   git fetch origin
-  git reset --hard origin/master
+  git reset --hard origin/main
 else
   mkdir -p "$(dirname "$INSTALL_DIR")"
   git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
@@ -169,6 +169,6 @@ echo -e "  ${GREEN}${BOLD}✓ DaveX is ready!${NC}"
 echo ""
 echo -e "  Run ${CYAN}${BOLD}davex${NC} to get started"
 echo ""
-echo -e "  ${BLUE}Docs:${NC}    https://github.com/masonjenkins893-dot/davex"
-echo -e "  ${BLUE}Support:${NC} https://github.com/masonjenkins893-dot/davex/issues"
+echo -e "  ${BLUE}Docs:${NC}    https://github.com/sixpert/davex"
+echo -e "  ${BLUE}Support:${NC} https://github.com/sixpert/davex/issues"
 echo ""

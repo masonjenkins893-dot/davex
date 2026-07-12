@@ -1,7 +1,5 @@
 # 🦞 DaveX
 
-![DaveX Demo](https://raw.githubusercontent.com/masonjenkins893-dot/davex/master/src/ui/davex-logo.png)
-
 **AI Coding Agent** — runs in your terminal, connects to Telegram, codes anything, remembers everything.
 
 Made by **Inyang David** @ **Sixpert**
@@ -12,28 +10,21 @@ Made by **Inyang David** @ **Sixpert**
 
 DaveX is a coding-first AI agent that works like Claude Code and Gemini CLI in your terminal, but also:
 
-- **Autonomous Operation** — DaveX doesn't just suggest code; it executes, debugs, and deploys. It keeps working until the task is done, no need to babysit it.
-- **Telegram Integration** — Connect your bot and take your agent anywhere. Send tasks from your phone, get status updates, and approve actions via Telegram.
-- **Deep Memory** — Features short-term session memory for context and long-term memory that survives restarts, allowing it to remember your preferences and project details.
-
----
-
-## Requirements
-
-Before installing DaveX, ensure your system meets the following requirements:
-
-- **Node.js**: version 20.0.0 or higher
-- **Git**: installed and configured
-- **Internet Connection**: for AI provider API access
+- Connects to **Telegram** so you can send it tasks and get results from your phone
+- Runs **autonomously** — keeps working until the task is done, no need to babysit it
+- Supports **25+ AI providers** — OpenAI, Anthropic, Gemini, Grok, Groq, Mistral, Cohere, Together, Cerebras, Nvidia NIM, Fireworks, Hyperbolic, DeepInfra, OpenRouter, HuggingFace, Perplexity, Qwen, SambaNova, Novita, AI21, MonsterAPI, Lepton, Cloudflare AI, Replicate, and local models
+- **Remembers** — short-term session memory + long-term memory that survives restarts
+- Can **run and deploy code** — tell it to build something and run it locally, it'll give you the URL
+- **Asks questions** when it needs info — pauses and waits for your answer, in terminal or Telegram
+- Connects to **MCP servers**
+- Has a **skills system**, **extensions**, **hooks**, **themes**, and **plan mode**
 
 ---
 
 ## Install
 
-Run the following command in your terminal:
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/masonjenkins893-dot/davex/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sixpert/davex/main/install.sh | bash
 ```
 
 Then run:
@@ -46,11 +37,12 @@ davex
 
 ## First run
 
-1. **Logo Display**: DaveX shows its iconic logo.
-2. **Workspace Setup**: Approves your current workspace folder.
-3. **Telegram Pairing**: Asks for your Telegram bot token (from [@BotFather](https://t.me/BotFather)) and your chat ID.
-4. **AI Configuration**: Lets you pick a provider, enter your API key, and choose a model.
-5. **Ready**: You're ready to start coding.
+1. DaveX shows its logo
+2. Approves your workspace folder
+3. Asks for your Telegram bot token (from @BotFather)
+4. Asks for your Telegram chat ID
+5. Lets you pick a provider, enter your API key, and choose a model
+6. You're ready to go
 
 ---
 
@@ -66,21 +58,21 @@ DaveX will build it, run it, and give you the URL — in the terminal and on Tel
 
 ### Slash commands
 
-| Command | Description |
-| :--- | :--- |
-| `/providers` | Pick provider + api key + model |
-| `/changemodel` | Switch model |
-| `/memory` | View or clear memory |
-| `/skills` | Manage skills |
-| `/mcp` | Add or manage MCP servers |
-| `/telegram` | Telegram status |
-| `/extensions` | Manage extensions |
-| `/theme` | Change terminal theme |
-| `/plan` | Toggle plan mode |
-| `/localmodel` | Run a local model |
-| `/usage` | Token usage |
-| `/hooks` | Manage hooks |
-| `/help` | All commands |
+```
+/providers      pick provider + api key + model
+/changemodel    switch model
+/memory         view or clear memory
+/skills         manage skills
+/mcp            add or manage MCP servers
+/telegram       telegram status
+/extensions     manage extensions
+/theme          change terminal theme
+/plan           toggle plan mode
+/localmodel     run a local model
+/usage          token usage
+/hooks          manage hooks
+/help           all commands
+```
 
 ### Telegram bot commands
 

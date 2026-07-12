@@ -1,4 +1,4 @@
-import { prepare } from '../storage/db.js';
+import { getDb } from '../storage/db.js';
 import { PROVIDERS, type ProviderId } from '../config/constants.js';
 import { getSetting, setSetting } from '../config/settings.js';
 import axios from 'axios';
@@ -12,36 +12,42 @@ export interface ProviderRecord {
   isActive: boolean;
 }
 
-export function listSavedProviders(): ProviderRecord[] {
-  const rows = prepare('SELECT * FROM providers').all() as any[];
-  return rows.map(r => ({
+export async function listSavedProviders(): Promise<ProviderRecord[]> {
+  const db = getDb();
+  const { data, error } = await db.from('providers').select('*');
+  if (error) throw new Error(`listSavedProviders failed: ${error.message}`);
+  return (data ?? []).map(r => ({
     id: r.id,
     name: r.name,
     apiKey: r.api_key,
     baseUrl: r.base_url,
     model: r.model,
-    isActive: r.is_active === 1,
+    isActive: r.is_active === true,
   }));
 }
 
-export function saveProvider(id: string, apiKey: string, model: string): void {
+export async function saveProvider(id: string, apiKey: string, model: string): Promise<void> {
+  const db = getDb();
   const info = PROVIDERS.find(p => p.id === id);
   if (!info) throw new Error(`Unknown provider: ${id}`);
-  prepare(`
-    INSERT OR REPLACE INTO providers (id, name, api_key, base_url, model)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, info.name, apiKey, info.baseUrl, model);
+  const { error } = await db.from('providers').upsert({
+    id, name: info.name, api_key: apiKey, base_url: info.baseUrl, model,
+  });
+  if (error) throw new Error(`saveProvider failed: ${error.message}`);
 }
 
-export function setActiveProvider(providerId: string, model: string): void {
-  prepare('UPDATE providers SET is_active = 0').run();
-  prepare('UPDATE providers SET is_active = 1, model = ? WHERE id = ?').run(model, providerId);
+export async function setActiveProvider(providerId: string, model: string): Promise<void> {
+  const db = getDb();
+  await db.from('providers').update({ is_active: false }).neq('id', '__none__');
+  const { error } = await db.from('providers').update({ is_active: true, model }).eq('id', providerId);
+  if (error) throw new Error(`setActiveProvider failed: ${error.message}`);
   setSetting('activeProvider', providerId);
   setSetting('activeModel', model);
 }
 
-export function getActiveProvider(): ProviderRecord | null {
-  const row = prepare('SELECT * FROM providers WHERE is_active = 1').get() as any;
+export async function getActiveProvider(): Promise<ProviderRecord | null> {
+  const db = getDb();
+  const { data: row } = await db.from('providers').select('*').eq('is_active', true).maybeSingle();
   if (!row) return null;
   return {
     id: row.id,

@@ -40,6 +40,17 @@ export function App(): React.ReactElement {
     awaitingQuestion: false,
     sessionId: uuidv4(),
   });
+  const [providerLabel, setProviderLabel] = useState<string>('loading...');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getActiveProvider().then(provider => {
+      if (!cancelled) setProviderLabel(provider ? `${provider.name} / ${provider.model}` : 'no provider');
+    }).catch(() => {
+      if (!cancelled) setProviderLabel('no provider');
+    });
+    return () => { cancelled = true; };
+  }, [state.isRunning]); // refresh after each task in case /model changed things
 
   const abortRef = React.useRef<AbortController | null>(null);
   const questionResolveRef = React.useRef<((answer: string) => void) | null>(null);
@@ -85,7 +96,7 @@ export function App(): React.ReactElement {
     addMessage({ role: 'user', content: value });
     setState(s => ({ ...s, isRunning: true, currentTask: value }));
 
-    const provider = getActiveProvider();
+    const provider = await getActiveProvider();
     if (!provider) {
       addMessage({ role: 'error', content: '❌ No provider set. Run /providers to configure one.' });
       setState(s => ({ ...s, isRunning: false }));
@@ -107,6 +118,30 @@ export function App(): React.ReactElement {
     abortRef.current = new AbortController();
 
     let streamingMsgId: string | null = null;
+    let pendingBuffer = '';
+    let lastFlush = 0;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = () => {
+      if (!pendingBuffer) return;
+      const chunkToApply = pendingBuffer;
+      pendingBuffer = '';
+      lastFlush = Date.now();
+
+      setState(s => {
+        const isFirstChunk = streamingMsgId === null;
+        if (isFirstChunk) streamingMsgId = uuidv4();
+        const newBuffer = s.streamBuffer + chunkToApply;
+
+        return {
+          ...s,
+          streamBuffer: newBuffer,
+          messages: isFirstChunk
+            ? [...s.messages, { id: streamingMsgId!, role: 'assistant', content: newBuffer, streaming: true }]
+            : s.messages.map(m => m.id === streamingMsgId ? { ...m, content: newBuffer } : m),
+        };
+      });
+    };
 
     try {
       const result = await runAgentLoop({
@@ -115,21 +150,17 @@ export function App(): React.ReactElement {
         context: ctx,
         abortSignal: abortRef.current.signal,
         onProgress: (chunk) => {
-          setState(s => {
-            const newBuffer = s.streamBuffer + chunk;
-            if (!streamingMsgId) {
-              streamingMsgId = uuidv4();
-            }
-            return {
-              ...s,
-              streamBuffer: newBuffer,
-              messages: streamingMsgId
-                ? s.messages.map(m => m.id === streamingMsgId
-                    ? { ...m, content: newBuffer }
-                    : m)
-                : [...s.messages, { id: streamingMsgId!, role: 'assistant', content: newBuffer, streaming: true }],
-            };
-          });
+          // Batch chunks and repaint at most ~12x/sec instead of on every
+          // token — updating Ink's whole tree on every chunk is what was
+          // causing the terminal to visibly shake while text streamed in.
+          pendingBuffer += chunk;
+          const now = Date.now();
+          if (now - lastFlush >= 80) {
+            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+            flush();
+          } else if (!flushTimer) {
+            flushTimer = setTimeout(() => { flushTimer = null; flush(); }, 80);
+          }
         },
         onQuestion: async (question) => {
           setState(s => ({
@@ -146,6 +177,10 @@ export function App(): React.ReactElement {
         },
       });
 
+      // Flush any text still sitting in the throttle buffer before finalizing
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      flush();
+
       // Finalize streaming message
       setState(s => ({
         ...s,
@@ -161,6 +196,7 @@ export function App(): React.ReactElement {
       await sendToTelegram(`✅ Task done!\n\n${result.output.slice(0, 2000)}`);
 
     } catch (err: any) {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       if (err.name !== 'AbortError') {
         addMessage({ role: 'error', content: `❌ ${err.message}` });
       }
@@ -170,8 +206,7 @@ export function App(): React.ReactElement {
     }
   }, [state.isRunning, state.awaitingQuestion, state.sessionId, addMessage, exit]);
 
-  const provider = getActiveProvider();
-  const providerLabel = provider ? `${provider.name} / ${provider.model}` : 'no provider';
+
 
   return (
     <Box flexDirection="column" height="100%">
@@ -312,19 +347,25 @@ async function handleSlashCommand(
       break;
     case '/memory':
       const { listMemory } = await import('../memory/manager.js');
-      const mems = listMemory('global');
+      const mems = await listMemory('global');
       if (mems.length === 0) {
         addMessage({ role: 'system', content: '🧠 No memories stored yet.' });
       } else {
         addMessage({ role: 'system', content: `🧠 Memory:\n${mems.slice(0, 20).map(m => `• ${m.key}: ${m.value}`).join('\n')}` });
       }
       break;
-    case '/usage':
+    case '/usage': {
       const { getDb } = await import('../storage/db.js');
       const db = getDb();
-      const row = db.prepare('SELECT SUM(prompt_tokens) as p, SUM(completion_tokens) as c, SUM(total_tokens) as t FROM usage').get() as any;
-      addMessage({ role: 'system', content: `📊 Usage: ${row?.t ?? 0} total tokens (${row?.p ?? 0} prompt, ${row?.c ?? 0} completion)` });
+      const { data } = await db.from('usage').select('prompt_tokens, completion_tokens, total_tokens');
+      const totals = (data ?? []).reduce((acc, r) => ({
+        p: acc.p + (r.prompt_tokens ?? 0),
+        c: acc.c + (r.completion_tokens ?? 0),
+        t: acc.t + (r.total_tokens ?? 0),
+      }), { p: 0, c: 0, t: 0 });
+      addMessage({ role: 'system', content: `📊 Usage: ${totals.t} total tokens (${totals.p} prompt, ${totals.c} completion)` });
       break;
+    }
     case '/clear':
       // Can't clear in Ink easily, but add a separator
       addMessage({ role: 'system', content: '─────────────────────────────' });
@@ -337,13 +378,13 @@ async function handleSlashCommand(
       const { listMcpServers, addMcpServer, removeMcpServer } = await import('../mcp/manager.js');
       if (args.startsWith('add ')) {
         const [name, url] = args.replace('add ', '').split(' ');
-        addMcpServer(name, { url });
+        await addMcpServer(name, { url });
         addMessage({ role: 'system', content: `✅ MCP server "${name}" added.` });
       } else if (args.startsWith('remove ')) {
-        removeMcpServer(args.replace('remove ', ''));
+        await removeMcpServer(args.replace('remove ', ''));
         addMessage({ role: 'system', content: `🗑️ MCP server removed.` });
       } else {
-        const servers = listMcpServers();
+        const servers = await listMcpServers();
         addMessage({ role: 'system', content: servers.length === 0
           ? 'No MCP servers configured.\nUsage: /mcp add <name> <url>'
           : `MCP servers:\n${servers.map(s => `• ${s.name} ${s.enabled ? '✅' : '❌'} — ${s.url ?? s.command}`).join('\n')}` });
@@ -352,7 +393,7 @@ async function handleSlashCommand(
     }
     case '/skills': {
       const { listSkills } = await import('../skills/manager.js');
-      const skills = listSkills();
+      const skills = await listSkills();
       addMessage({ role: 'system', content: skills.length === 0
         ? '🛠️ No skills installed yet. Drop SKILL.md folders into ~/.davex/skills'
         : `🛠️ Skills:\n${skills.map(s => `• ${s.name} ${s.enabled ? '✅' : '❌'} — ${s.description}`).join('\n')}` });
@@ -360,7 +401,7 @@ async function handleSlashCommand(
     }
     case '/extensions': {
       const { listExtensions } = await import('../extensions/manager.js');
-      const exts = listExtensions();
+      const exts = await listExtensions();
       addMessage({ role: 'system', content: exts.length === 0
         ? '🧩 No extensions installed. Drop them in ~/.davex/extensions'
         : `🧩 Extensions:\n${exts.map(e => `• ${e.name} v${e.version} ${e.enabled ? '✅' : '❌'}`).join('\n')}` });
@@ -399,7 +440,7 @@ async function handleSlashCommand(
     }
     case '/hooks': {
       const { listHooks } = await import('../hooks/manager.js');
-      const hooks = listHooks();
+      const hooks = await listHooks();
       addMessage({ role: 'system', content: hooks.length === 0
         ? '🪝 No hooks configured.'
         : `🪝 Hooks:\n${hooks.map(h => `• [${h.event}] ${h.command}`).join('\n')}` });

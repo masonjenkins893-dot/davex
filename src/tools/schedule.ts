@@ -1,9 +1,9 @@
 import cron from 'node-cron';
 import { registerTool } from './registry.js';
-import { prepare } from '../storage/db.js';
+import { getDb } from '../storage/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
-const activeJobs = new Map<string, any>();
+const activeJobs = new Map<string, cron.ScheduledTask>();
 
 registerTool(
   {
@@ -27,10 +27,11 @@ registerTool(
     if (!cron.validate(schedule)) return `Invalid cron expression: ${schedule}`;
 
     const id = uuidv4();
-    prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(
-      `cron:${name}`,
-      JSON.stringify({ id, name, schedule, command })
-    );
+    const db = getDb();
+    await db.from('config').upsert({
+      key: `cron:${name}`,
+      value: JSON.stringify({ id, name, schedule, command }),
+    });
 
     const { execa } = await import('execa');
     const job = cron.schedule(schedule, async () => {
@@ -49,8 +50,10 @@ registerTool(
     parameters: { type: 'object', properties: {} },
   },
   async () => {
-    const rows = prepare("SELECT key, value FROM config WHERE key LIKE 'cron:%'").all() as any[];
-    if (rows.length === 0) return 'No scheduled tasks.';
+    const db = getDb();
+    const { data: rows, error } = await db.from('config').select('key, value').like('key', 'cron:%');
+    if (error) return `Error listing schedules: ${error.message}`;
+    if (!rows || rows.length === 0) return 'No scheduled tasks.';
     return rows.map(r => {
       const task = JSON.parse(r.value);
       const running = activeJobs.has(task.name);
@@ -75,7 +78,8 @@ registerTool(
     const name = args.name as string;
     const job = activeJobs.get(name);
     if (job) { job.stop(); activeJobs.delete(name); }
-    prepare("DELETE FROM config WHERE key = ?").run(`cron:${name}`);
+    const db = getDb();
+    await db.from('config').delete().eq('key', `cron:${name}`);
     return `Cancelled schedule: ${name}`;
   }
 );

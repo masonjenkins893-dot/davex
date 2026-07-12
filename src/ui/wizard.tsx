@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Box, Text, useApp } from 'ink';
+import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import { setSetting, markSetupDone } from '../config/settings.js';
@@ -10,6 +10,8 @@ import fs from 'fs-extra';
 type WizardStep =
   | 'logo'
   | 'workspace'
+  | 'supabase_url'
+  | 'supabase_key'
   | 'telegram_token'
   | 'telegram_chat_id'
   | 'provider_select'
@@ -21,6 +23,7 @@ interface WizardState {
   step: WizardStep;
   input: string;
   workspacePath: string;
+  supabaseUrl: string;
   telegramToken: string;
   telegramChatId: string;
   selectedProvider: string;
@@ -32,7 +35,7 @@ interface WizardState {
 }
 
 interface WizardProps {
-  onDone: () => void;
+  onDone: () => void | Promise<void>;
 }
 
 export function Wizard({ onDone }: WizardProps): React.ReactElement {
@@ -40,6 +43,7 @@ export function Wizard({ onDone }: WizardProps): React.ReactElement {
     step: 'logo',
     input: '',
     workspacePath: process.cwd(),
+    supabaseUrl: '',
     telegramToken: '',
     telegramChatId: '',
     selectedProvider: '',
@@ -91,7 +95,66 @@ export function Wizard({ onDone }: WizardProps): React.ReactElement {
               }
               setSetting('workspacePath', workspace);
               setSetting('workspaceApproved', true);
-              set({ workspacePath: workspace, step: 'telegram_token', input: '', error: '' });
+              set({ workspacePath: workspace, step: 'supabase_url', input: '', error: '' });
+            }}
+          />
+        </Box>
+        {state.error && <Text color="red">{state.error}</Text>}
+      </Box>
+    );
+  }
+
+  // Supabase project URL — DaveX stores everything (sessions, memory,
+  // providers, Telegram pairing) here instead of a local SQLite file, so
+  // it works identically on desktop, servers, and phones (Termux/Android
+  // can't compile the native SQLite module).
+  if (state.step === 'supabase_url') {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text color="cyan" bold>🗄️  Storage — Supabase Project URL</Text>
+        <Text> </Text>
+        <Text>DaveX stores sessions, memory, and settings in a Supabase project.</Text>
+        <Text color="gray">Create one free at supabase.com, then paste its Project URL below.</Text>
+        <Text color="gray">Example: https://abcdefgh.supabase.co</Text>
+        <Text> </Text>
+        <Box>
+          <Text color="cyan">&gt; Project URL: </Text>
+          <TextInput
+            value={state.input}
+            onChange={(v) => set({ input: v })}
+            onSubmit={(v) => {
+              const url = v.trim();
+              if (!url) { set({ error: 'A Supabase project URL is required.' }); return; }
+              setSetting('supabaseUrl', url);
+              set({ supabaseUrl: url, step: 'supabase_key', input: '', error: '' });
+            }}
+          />
+        </Box>
+        {state.error && <Text color="red">{state.error}</Text>}
+      </Box>
+    );
+  }
+
+  // Supabase service role key
+  if (state.step === 'supabase_key') {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text color="cyan" bold>🔑 Storage — Supabase Service Role Key</Text>
+        <Text> </Text>
+        <Text>Project Settings → API → service_role key (starts with "eyJ...")</Text>
+        <Text color="gray">This stays local on this device — never sent anywhere else.</Text>
+        <Text> </Text>
+        <Box>
+          <Text color="cyan">&gt; Service role key: </Text>
+          <TextInput
+            value={state.input}
+            onChange={(v) => set({ input: v })}
+            mask="*"
+            onSubmit={(v) => {
+              const key = v.trim();
+              if (!key) { set({ error: 'The service role key is required.' }); return; }
+              setSetting('supabaseServiceKey', key);
+              set({ step: 'telegram_token', input: '', error: '' });
             }}
           />
         </Box>
@@ -188,6 +251,7 @@ export function Wizard({ onDone }: WizardProps): React.ReactElement {
           <TextInput
             value={state.input}
             onChange={(v) => set({ input: v })}
+            mask="*"
             onSubmit={async (v) => {
               const key = v.trim();
               if (!key) { set({ error: 'API key is required.' }); return; }
@@ -214,12 +278,21 @@ export function Wizard({ onDone }: WizardProps): React.ReactElement {
       <Box flexDirection="column" padding={1}>
         <Text color="cyan" bold>🤖 Choose a Model</Text>
         <Text> </Text>
+        {state.loading && <Text color="cyan">Saving...</Text>}
+        {state.error && <Text color="red">{state.error}</Text>}
         <SelectInput
           items={items}
           onSelect={(item) => {
-            saveProvider(state.selectedProvider, state.apiKey, item.value);
-            setActiveProvider(state.selectedProvider, item.value);
-            set({ selectedModel: item.value, step: 'done' });
+            set({ loading: true, error: '' });
+            (async () => {
+              try {
+                await saveProvider(state.selectedProvider, state.apiKey, item.value);
+                await setActiveProvider(state.selectedProvider, item.value);
+                set({ selectedModel: item.value, step: 'done', loading: false });
+              } catch (err: any) {
+                set({ loading: false, error: `Could not save provider: ${err.message}` });
+              }
+            })();
           }}
         />
       </Box>
@@ -229,8 +302,7 @@ export function Wizard({ onDone }: WizardProps): React.ReactElement {
   // Done
   if (state.step === 'done') {
     markSetupDone();
-    setSetting('firstRun', false);
-    setTimeout(onDone, 1500);
+    setTimeout(() => { void onDone(); }, 1500);
     return (
       <Box flexDirection="column" padding={1}>
         <Text color="green" bold>✅ DaveX is ready!</Text>

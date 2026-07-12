@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { getConfig, setConfig, prepare } from '../storage/db.js';
+import { getConfig, setConfig, getDb } from '../storage/db.js';
 
 export type HookEvent = 'task_start' | 'task_end' | 'tool_before' | 'tool_after' | 'error';
 
@@ -8,16 +8,19 @@ export interface HookConfig {
   command: string;
 }
 
-export function registerHook(event: HookEvent, command: string): void {
-  const existing = JSON.parse(getConfig(`hooks:${event}`) ?? '[]') as string[];
+export async function registerHook(event: HookEvent, command: string): Promise<void> {
+  const existing = JSON.parse((await getConfig(`hooks:${event}`)) ?? '[]') as string[];
   existing.push(command);
-  setConfig(`hooks:${event}`, JSON.stringify(existing));
+  await setConfig(`hooks:${event}`, JSON.stringify(existing));
 }
 
-export function listHooks(): HookConfig[] {
-  const rows = prepare("SELECT key, value FROM config WHERE key LIKE 'hooks:%'").all() as any[];
+export async function listHooks(): Promise<HookConfig[]> {
+  const db = getDb();
+  const { data, error } = await db.from('config').select('key, value').like('key', 'hooks:%');
+  if (error) throw new Error(`listHooks failed: ${error.message}`);
+
   const result: HookConfig[] = [];
-  for (const row of rows) {
+  for (const row of data ?? []) {
     const event = row.key.replace('hooks:', '') as HookEvent;
     const commands = JSON.parse(row.value) as string[];
     for (const command of commands) result.push({ event, command });
@@ -25,12 +28,12 @@ export function listHooks(): HookConfig[] {
   return result;
 }
 
-export function removeHooksForEvent(event: HookEvent): void {
-  setConfig(`hooks:${event}`, '[]');
+export async function removeHooksForEvent(event: HookEvent): Promise<void> {
+  await setConfig(`hooks:${event}`, '[]');
 }
 
 export async function runHooks(event: HookEvent, context?: Record<string, string>): Promise<void> {
-  const hooks = listHooks().filter(h => h.event === event);
+  const hooks = (await listHooks()).filter(h => h.event === event);
   for (const hook of hooks) {
     try {
       await execa('bash', ['-c', hook.command], {

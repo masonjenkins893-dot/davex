@@ -1,4 +1,4 @@
-import { prepare } from '../storage/db.js';
+import { getDb } from '../storage/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface MemoryEntry {
@@ -11,39 +11,43 @@ export interface MemoryEntry {
   updatedAt: string;
 }
 
-export function saveMemory(key: string, value: string, sessionId?: string): void {
+export async function saveMemory(key: string, value: string, sessionId?: string): Promise<void> {
+  const db = getDb();
   const scope = sessionId ? 'session' : 'global';
-  const existing = prepare('SELECT id FROM memory WHERE key = ? AND scope = ?').get(key, scope);
+
+  const { data: existing } = await db.from('memory').select('id').eq('key', key).eq('scope', scope).maybeSingle();
+
   if (existing) {
-    prepare("UPDATE memory SET value = ?, updated_at = datetime('now') WHERE key = ? AND scope = ?")
-      .run(value, key, scope);
+    await db.from('memory').update({ value, updated_at: new Date().toISOString() }).eq('id', existing.id);
   } else {
-    prepare('INSERT INTO memory (id, key, value, scope, session_id) VALUES (?, ?, ?, ?, ?)')
-      .run(uuidv4(), key, value, scope, sessionId ?? null);
+    await db.from('memory').insert({ id: uuidv4(), key, value, scope, session_id: sessionId ?? null });
   }
 }
 
-export function getMemory(key: string, sessionId?: string): string | null {
+export async function getMemory(key: string, sessionId?: string): Promise<string | null> {
+  const db = getDb();
   if (sessionId) {
-    const row = prepare("SELECT value FROM memory WHERE key = ? AND session_id = ?")
-      .get(key, sessionId) as { value: string } | undefined;
-    if (row) return row.value;
+    const { data } = await db.from('memory').select('value').eq('key', key).eq('session_id', sessionId).maybeSingle();
+    if (data) return data.value as string;
   }
-  const row = prepare("SELECT value FROM memory WHERE key = ? AND scope = 'global'")
-    .get(key) as { value: string } | undefined;
-  return row?.value ?? null;
+  const { data } = await db.from('memory').select('value').eq('key', key).eq('scope', 'global').maybeSingle();
+  return data ? (data.value as string) : null;
 }
 
-export function listMemory(scope?: 'global' | 'session', sessionId?: string): MemoryEntry[] {
-  let rows: any[];
+export async function listMemory(scope?: 'global' | 'session', sessionId?: string): Promise<MemoryEntry[]> {
+  const db = getDb();
+  let query = db.from('memory').select('*').order('updated_at', { ascending: false });
+
   if (scope === 'session' && sessionId) {
-    rows = prepare('SELECT * FROM memory WHERE scope = ? AND session_id = ? ORDER BY updated_at DESC').all(scope, sessionId);
+    query = query.eq('scope', 'session').eq('session_id', sessionId);
   } else if (scope === 'global') {
-    rows = prepare("SELECT * FROM memory WHERE scope = 'global' ORDER BY updated_at DESC").all();
-  } else {
-    rows = prepare('SELECT * FROM memory ORDER BY updated_at DESC').all();
+    query = query.eq('scope', 'global');
   }
-  return rows.map(r => ({
+
+  const { data, error } = await query;
+  if (error) throw new Error(`listMemory failed: ${error.message}`);
+
+  return (data ?? []).map(r => ({
     id: r.id,
     key: r.key,
     value: r.value,
@@ -54,26 +58,29 @@ export function listMemory(scope?: 'global' | 'session', sessionId?: string): Me
   }));
 }
 
-export function deleteMemory(key: string): void {
-  prepare('DELETE FROM memory WHERE key = ?').run(key);
+export async function deleteMemory(key: string): Promise<void> {
+  const db = getDb();
+  await db.from('memory').delete().eq('key', key);
 }
 
-export function clearMemory(scope?: 'global' | 'session'): void {
+export async function clearMemory(scope?: 'global' | 'session'): Promise<void> {
+  const db = getDb();
   if (scope) {
-    prepare('DELETE FROM memory WHERE scope = ?').run(scope);
+    await db.from('memory').delete().eq('scope', scope);
   } else {
-    prepare('DELETE FROM memory').run();
+    await db.from('memory').delete().neq('id', '__none__');
   }
 }
 
-export function getSessionMessages(sessionId: string): { role: string; content: string }[] {
-  return (prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC')
-    .all(sessionId) as any[])
-    .map(r => ({ role: r.role, content: r.content }));
+export async function getSessionMessages(sessionId: string): Promise<{ role: string; content: string }[]> {
+  const db = getDb();
+  const { data, error } = await db.from('messages').select('role, content').eq('session_id', sessionId).order('created_at', { ascending: true });
+  if (error) throw new Error(`getSessionMessages failed: ${error.message}`);
+  return (data ?? []).map(r => ({ role: r.role, content: r.content }));
 }
 
-export function buildMemoryContext(sessionId?: string): string {
-  const globals = listMemory('global');
+export async function buildMemoryContext(sessionId?: string): Promise<string> {
+  const globals = await listMemory('global');
   if (globals.length === 0) return '';
   const lines = globals.slice(0, 20).map(m => `- ${m.key}: ${m.value}`);
   return `\n## Long-term memory\n${lines.join('\n')}\n`;

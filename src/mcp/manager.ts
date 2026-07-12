@@ -1,4 +1,4 @@
-import { prepare } from '../storage/db.js';
+import { getDb } from '../storage/db.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface McpServerConfig {
@@ -10,38 +10,43 @@ export interface McpServerConfig {
   enabled: boolean;
 }
 
-export function addMcpServer(name: string, opts: { url?: string; command?: string; args?: string[] }): void {
-  prepare(`
-    INSERT INTO mcp_servers (id, name, url, command, args, enabled)
-    VALUES (?, ?, ?, ?, ?, 1)
-  `).run(uuidv4(), name, opts.url ?? null, opts.command ?? null, opts.args ? JSON.stringify(opts.args) : null);
+export async function addMcpServer(name: string, opts: { url?: string; command?: string; args?: string[] }): Promise<void> {
+  const db = getDb();
+  await db.from('mcp_servers').insert({
+    id: uuidv4(), name, url: opts.url ?? null, command: opts.command ?? null,
+    args: opts.args ?? null, enabled: true,
+  });
 }
 
-export function listMcpServers(): McpServerConfig[] {
-  const rows = prepare('SELECT * FROM mcp_servers').all() as any[];
-  return rows.map(r => ({
+export async function listMcpServers(): Promise<McpServerConfig[]> {
+  const db = getDb();
+  const { data, error } = await db.from('mcp_servers').select('*');
+  if (error) throw new Error(`listMcpServers failed: ${error.message}`);
+  return (data ?? []).map(r => ({
     id: r.id,
     name: r.name,
     url: r.url,
     command: r.command,
-    args: r.args ? JSON.parse(r.args) : undefined,
-    enabled: r.enabled === 1,
+    args: r.args ?? undefined,
+    enabled: r.enabled === true,
   }));
 }
 
-export function removeMcpServer(name: string): void {
-  prepare('DELETE FROM mcp_servers WHERE name = ?').run(name);
+export async function removeMcpServer(name: string): Promise<void> {
+  const db = getDb();
+  await db.from('mcp_servers').delete().eq('name', name);
 }
 
-export function toggleMcpServer(name: string, enabled: boolean): void {
-  prepare('UPDATE mcp_servers SET enabled = ? WHERE name = ?').run(enabled ? 1 : 0, name);
+export async function toggleMcpServer(name: string, enabled: boolean): Promise<void> {
+  const db = getDb();
+  await db.from('mcp_servers').update({ enabled }).eq('name', name);
 }
 
 // Connects to configured MCP servers at startup, same pattern as OpenClaw/Gemini CLI:
 // - "url" type servers connect over SSE/HTTP
 // - "command" type servers spawn a local stdio process
 export async function connectMcpServers(): Promise<void> {
-  const servers = listMcpServers().filter(s => s.enabled);
+  const servers = (await listMcpServers()).filter(s => s.enabled);
   for (const server of servers) {
     try {
       if (server.url) {

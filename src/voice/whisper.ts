@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import { getSetting, setSetting } from '../config/settings.js';
-import { prepare } from '../storage/db.js';
+import { getDb } from '../storage/db.js';
 
 export async function transcribeVoice(audioFilePath: string): Promise<string> {
   // Get or ask for Groq API key
@@ -23,25 +23,28 @@ export async function transcribeVoice(audioFilePath: string): Promise<string> {
   return typeof transcription === 'string' ? transcription : (transcription as any).text ?? '';
 }
 
-export function saveGroqWhisperKey(apiKey: string): void {
+export async function saveGroqWhisperKey(apiKey: string): Promise<void> {
   setSetting('groqApiKeyForWhisper', apiKey);
   // Also save to providers table so it can be reused
-  const existing = prepare("SELECT id FROM providers WHERE id = 'groq'").get();
+  const db = getDb();
+  const { data: existing } = await db.from('providers').select('id').eq('id', 'groq').maybeSingle();
   if (!existing) {
-    prepare("INSERT OR IGNORE INTO providers (id, name, api_key, base_url) VALUES ('groq', 'Groq', ?, 'https://api.groq.com/openai/v1')")
-      .run(apiKey);
+    await db.from('providers').insert({
+      id: 'groq', name: 'Groq', api_key: apiKey, base_url: 'https://api.groq.com/openai/v1',
+    });
   }
 }
 
-export function hasGroqWhisperKey(): boolean {
+export async function hasGroqWhisperKey(): Promise<boolean> {
   const key = getSetting('groqApiKeyForWhisper');
-  // Also check providers table
-  if (!key) {
-    const row = prepare("SELECT api_key FROM providers WHERE id = 'groq'").get() as any;
-    if (row?.api_key) {
-      setSetting('groqApiKeyForWhisper', row.api_key);
-      return true;
-    }
+  if (key) return true;
+
+  // Also check providers table in case Groq was added via /providers instead
+  const db = getDb();
+  const { data: row } = await db.from('providers').select('api_key').eq('id', 'groq').maybeSingle();
+  if (row?.api_key) {
+    setSetting('groqApiKeyForWhisper', row.api_key);
+    return true;
   }
-  return !!key;
+  return false;
 }

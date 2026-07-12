@@ -30,14 +30,14 @@ export async function runProvidersWizardCLI(): Promise<void> {
   });
   if (!model) return;
 
-  saveProvider(providerId, apiKey, model);
-  setActiveProvider(providerId, model);
+  await saveProvider(providerId, apiKey, model);
+  await setActiveProvider(providerId, model);
   console.log(`✅ Provider set: ${providerId} / ${model}`);
 }
 
 export async function runChangeModelCLI(): Promise<void> {
   const prompts = (await import('prompts')).default;
-  const providers = listSavedProviders();
+  const providers = await listSavedProviders();
 
   if (providers.length === 0) {
     console.log('No providers configured yet. Run /providers first.');
@@ -63,6 +63,6 @@ export async function runChangeModelCLI(): Promise<void> {
   });
   if (!model) return;
 
-  setActiveProvider(providerId, model);
+  await setActiveProvider(providerId, model);
   console.log(`✅ Model changed to: ${model}`);
 }

@@ -42,7 +42,7 @@ export async function pullLocalModel(modelName: string): Promise<string> {
   return result.all ?? `Pulled ${modelName}`;
 }
 
-export function setActiveLocalModel(modelName: string): void {
-  saveProvider('localmodel', 'not-needed', modelName);
-  setActiveProvider('localmodel', modelName);
+export async function setActiveLocalModel(modelName: string): Promise<void> {
+  await saveProvider('localmodel', 'not-needed', modelName);
+  await setActiveProvider('localmodel', modelName);
 }
